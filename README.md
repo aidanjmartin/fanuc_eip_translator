@@ -154,52 +154,56 @@ ros2 topic hz /joint_states    # should report ~20 Hz
 
 ## MATLAB Kinematics Dashboard
 
+The live dashboard script is located at [`matlab/ros_test.m`](matlab/ros_test.m).
+
+### Requirements
+
+- **MATLAB R2022b or later** with the **ROS Toolbox** add-on (MathWorks Add-On Explorer)
+- The MATLAB laptop must be on the same `192.168.1.x` subnet as the Ubuntu ROS 2 machine
+- `ROS_DOMAIN_ID=0` must match on both machines
+
+### Running the Dashboard
+
+Open `matlab/ros_test.m` in MATLAB and press **Run** (or `F5`). The script:
+
+1. Creates a ROS 2 node (`/matlab_kinematics_node`) and subscribes to `/joint_states`
+2. Blocks until the first message arrives to establish a position baseline
+3. Opens a three-panel live figure — **Position**, **Velocity**, and **Acceleration** — with a rolling 5-second time window
+4. Loops until the figure window is closed, computing finite differences each cycle to derive velocity and acceleration from the raw position stream
+
 ### Connecting the MATLAB ROS Toolbox
 
-On the MATLAB laptop, install the **ROS Toolbox** (MathWorks Add-On Explorer). No ROS master is required for ROS 2 — the toolbox uses DDS directly.
-
-Initialize a ROS 2 node in MATLAB:
-
-```matlab
-node = ros2node('/matlab_kinematics_client');
-sub  = ros2subscriber(node, '/joint_states', 'sensor_msgs/JointState', @kinematicsCallback);
-```
-
-Because `ROS_DOMAIN_ID=0` is set on both machines and both are on the `192.168.1.x` subnet, DDS will discover the Ubuntu publisher automatically within a few seconds.
+No ROS master is required for ROS 2 — the toolbox uses DDS directly. Because `ROS_DOMAIN_ID=0` is set on both machines and both are on the `192.168.1.x` subnet, DDS will discover the Ubuntu publisher automatically within a few seconds of the node starting.
 
 ### Data Handoff
 
-Each `sensor_msgs/JointState` message delivered to the callback contains:
+Each `sensor_msgs/JointState` message received from the ROS 2 node contains:
 
 | Field | Type | Content |
 |---|---|---|
 | `header.stamp` | `builtin_interfaces/Time` | ROS clock timestamp of the sample |
 | `name` | `string[6]` | `['J1','J2','J3','J4','J5','J6']` |
 | `position` | `float64[6]` | Joint angles in **radians** |
-| `velocity` | `float64[]` | Empty (not populated by this node) |
-| `effort` | `float64[]` | Empty (not populated by this node) |
+| `velocity` | `float64[]` | Empty (not populated by the ROS 2 node) |
+| `effort` | `float64[]` | Empty (not populated by the ROS 2 node) |
 
-### Kinematics Dashboard Concept
+### Kinematics Math
 
-Because the node provides a continuous, timestamped position stream at 20 Hz, the MATLAB client can derive higher-order kinematics entirely in software:
+All higher-order kinematics are derived on the MATLAB side using finite differences over consecutive samples:
 
-**Velocity** — finite difference on consecutive position samples:
-
-```matlab
-omega = (q_now - q_prev) / dt;   % rad/s per joint
-```
-
-**Acceleration** — second finite difference:
+**Velocity** (rad/s per joint):
 
 ```matlab
-alpha = (omega_now - omega_prev) / dt;   % rad/s² per joint
+current_vel = (current_pos - prev_pos) / dt;
 ```
 
-The Dashboard typically presents:
-- **Live joint angle plots** (6 time series)
-- **Per-joint velocity** (deg/s or rad/s)
-- **Per-joint acceleration** (deg/s² or rad/s²)
-- Optional: **Cartesian end-effector velocity** derived from the robot's Jacobian
+**Acceleration** (rad/s² per joint):
+
+```matlab
+current_acc = (current_vel - prev_vel) / dt;
+```
+
+`drawnow limitrate` is used to throttle rendering so the math loop is never blocked by the graphics pipeline.
 
 Because all computation happens on the MATLAB side and the ROS 2 node only publishes raw positions, the bridge remains stateless and the dashboard logic can be iterated without touching the ROS 2 package.
 
@@ -213,6 +217,8 @@ fanuc_eip_translator/
 │   ├── __init__.py
 │   ├── eip_translator_node.py   # ROS 2 node implementation
 │   └── py.typed
+├── matlab/
+│   └── ros_test.m               # Live kinematics dashboard (MATLAB ROS Toolbox)
 ├── resource/
 │   └── fanuc_eip_translator
 ├── test/
